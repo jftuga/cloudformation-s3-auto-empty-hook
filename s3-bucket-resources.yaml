@@ -1,0 +1,91 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+# -----------------------------------------------------------------------------
+# CloudFormation Template: S3 Bucket Resources
+# -----------------------------------------------------------------------------
+# Purpose:
+#   This template creates an S3 bucket with appropriate security settings
+#   and configures a CloudFormation Lambda hook to empty the bucket before
+#   deletion, allowing clean stack teardown.
+#
+# Components:
+#   - S3 Bucket with security and encryption settings
+#   - CloudFormation Lambda Hook configuration
+#
+# Dependencies:
+#   - Requires the lambda-hook-infrastructure stack to be deployed first
+#   - References Lambda and IAM role names from the hook infrastructure
+#
+# Usage:
+#   This template can be deployed to multiple environments (dev, test, prod)
+#   and relies on parameters to customize bucket names and hook settings.
+# -----------------------------------------------------------------------------
+Description: S3 bucket creation with pre-delete emptying hook
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket
+  StackShortName:
+    Type: String
+    Description: Short name of the stack, Lambda Hook compatible
+  CfnHookInvokerRoleName:
+    Type: String
+    Description: IAM role that the Hook assumes to invoke your Lambda function
+  CfnHookLambdaName:
+    Type: String
+    Description: Name of the Lambda function that the Hook invokes
+  HookTargetAction:
+    Type: String
+    Description: Action to be performed on the target resource
+    AllowedValues:
+      - CREATE
+      - DELETE
+      - UPDATE
+  HookTargetName:
+    Type: String
+    Description: Name of the target resource
+
+Resources:
+  # S3 Bucket with security and encryption settings
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaEmptyS3BucketHook
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: stackid
+          Value: !Ref AWS::StackId
+
+  # CloudFormation Lambda Hook that empties the bucket before deletion
+  LambdaEmptyS3BucketHook:
+    Type: AWS::CloudFormation::LambdaHook
+    Properties:
+      Alias: !Sub "OrgName::CfnHookEmptyS3Bucket::${StackShortName}"
+      ExecutionRole: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${CfnHookInvokerRoleName}"
+      FailureMode: FAIL
+      HookStatus: ENABLED
+      LambdaFunction: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${CfnHookLambdaName}"
+      StackFilters:
+        FilteringCriteria: ALL
+        StackNames:
+          Include:
+            - !Sub "${AWS::StackName}"
+      TargetFilters:
+        Targets:
+          - Action: !Ref HookTargetAction
+            InvocationPoint: PRE_PROVISION
+            TargetName: !Ref HookTargetName
+      TargetOperations:
+        - RESOURCE

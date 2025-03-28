@@ -1,0 +1,27 @@
+[project]
+name = "cloudformation-s3-auto-empty-hook"
+dynamic = ["version"]
+description = "CloudFormation Lambda hook to automatically empty S3 buckets before deletion"
+readme = "README.md"
+requires-python = ">=3.13"
+
+authors = [
+    {name = "John Taylor", email = "jftuga@users.noreply.github.com"},
+]
+
+dependencies = [
+    "boto3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff",
+    "yamllint",
+    "cfn-lint",
+]
+
+[tool.black]
+line-length = 140
+target-version = ['py313']
+skip_magic_trailing_comma = true
