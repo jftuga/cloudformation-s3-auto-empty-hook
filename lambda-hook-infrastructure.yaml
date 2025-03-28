@@ -1,0 +1,106 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+# -----------------------------------------------------------------------------
+# CloudFormation Template: Lambda Hook Infrastructure
+# -----------------------------------------------------------------------------
+# Purpose:
+#   This template creates the permanent infrastructure components required
+#   for CloudFormation Lambda hooks to empty S3 buckets before deletion.
+#
+# Components:
+#   - Lambda function to empty S3 buckets
+#   - IAM role for CloudFormation to invoke the Lambda function
+#   - CloudWatch Log Group for Lambda logs
+#
+# Usage:
+#   Deploy this stack once per environment as it creates resources that
+#   should persist throughout the lifecycle of your application.
+# -----------------------------------------------------------------------------
+Description: CFN Hooks - Core infrastructure for S3 bucket emptying Lambda hooks
+
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  DeployerRegion:
+    Type: String
+    Description: Target region for IAM role deployment
+  CfnHookInvokerRoleName:
+    Type: String
+    Description: IAM role that the Hook assumes to invoke your Lambda function
+  CfnHookLambdaName:
+    Type: String
+    Description: Name of the Lambda function that the Hook invokes
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Handler: index.lambda_handler
+    Timeout: 30
+    MemorySize: 128
+
+Conditions:
+  IsDeployerRegion: !Equals [!Ref 'AWS::Region', !Ref DeployerRegion]
+
+Resources:
+  # Lambda function that will be invoked by the CloudFormation hook
+  CfnHookEmptyS3BucketLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: CFN hook to empty S3 buckets
+      CodeUri: src/lambda-hooks/empty-s3-bucket
+      FunctionName: !Ref CfnHookLambdaName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+                - s3:ListBucket
+                - s3:ListBucketVersions
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::*"    # For bucket-level actions
+                - !Sub "arn:${AWS::Partition}:s3:::*/*"  # For object-level actions
+              Condition:
+                StringEquals:
+                  "aws:ResourceAccount": !Ref AWS::AccountId
+      Tags:
+        stackid: !Ref AWS::StackId
+
+  # Log group for Lambda execution logs
+  CfnHookEmptyS3BucketLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${CfnHookEmptyS3BucketLambda}"
+      RetentionInDays: 30
+      Tags:
+        - Key: stackid
+          Value: !Ref AWS::StackId
+
+  # IAM role that allows CloudFormation hook service to invoke the Lambda
+  CfnHookEmptyS3BucketInvokerRole:
+    Type: AWS::IAM::Role
+    Condition: IsDeployerRegion
+    Properties:
+      RoleName: !Ref CfnHookInvokerRoleName
+      Description: Used by CloudFormation hooks to invoke Lambda functions
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - hooks.cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: CfnHookLambdaInvokerPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub "arn:${AWS::Partition}:lambda:*:${AWS::AccountId}:function:${CfnHookLambdaName}"
+      Tags:
+        - Key: stackid
+          Value: !Ref AWS::StackId
